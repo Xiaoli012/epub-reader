@@ -1,0 +1,20 @@
+{
+  "name": "EPUB 阅读器",
+  "short_name": "EPUB 阅读器",
+  "description": "本地 EPUB 电子书阅读器",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4ecd8",
+  "theme_color": "#f4ecd8",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

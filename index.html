@@ -1,0 +1,1163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#f5efe0">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.svg">
+<title>EPUB 阅读器</title>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
+<script>window.__INLINE_OK=false;</script>
+<style>
+:root {
+  --bg: #f5efe0;
+  --fg: #2b2620;
+  --accent: #8b6f47;
+  --panel: #fffaf0;
+  --panel-fg: #2b2620;
+  --shadow: rgba(0,0,0,.15);
+  --hl: #ffe066;
+}
+[data-theme="dark"] {
+  --bg: #1a1a1a;
+  --fg: #d4cfc4;
+  --accent: #c9a876;
+  --panel: #262626;
+  --panel-fg: #d4cfc4;
+  --shadow: rgba(0,0,0,.5);
+  --hl: #806020;
+}
+[data-theme="sepia"] {
+  --bg: #f4ecd8;
+  --fg: #5b4636;
+  --accent: #8b6f47;
+  --panel: #faf3e0;
+  --panel-fg: #5b4636;
+  --shadow: rgba(0,0,0,.15);
+  --hl: #e8c97a;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  overflow: hidden;
+  overscroll-behavior: none;
+  user-select: none;
+}
+#viewer {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+}
+#viewer iframe { background: var(--bg) !important; }
+
+/* Tap zones */
+.tap-zone {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 30%;
+  z-index: 10;
+}
+.tap-zone.left { left: 0; }
+.tap-zone.right { right: 0; }
+.tap-zone.center { left: 30%; right: 30%; }
+
+/* Floating side page buttons (always visible) */
+.float-btn {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 64px;
+  background: rgba(0,0,0,.18);
+  color: #fff;
+  border: none;
+  font-size: 28px;
+  font-weight: 300;
+  cursor: pointer;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.float-btn:active { background: rgba(0,0,0,.4); }
+.float-btn.left  { left: 0;  border-radius: 0 8px 8px 0; }
+.float-btn.right { right: 0; border-radius: 8px 0 0 8px; }
+[data-theme="dark"] .float-btn { background: rgba(255,255,255,.12); }
+[data-theme="dark"] .float-btn:active { background: rgba(255,255,255,.25); }
+
+/* Top + Bottom bars */
+.bar {
+  position: fixed;
+  left: 0; right: 0;
+  background: var(--panel);
+  color: var(--panel-fg);
+  z-index: 100;
+  transition: transform .25s ease;
+  box-shadow: 0 0 12px var(--shadow);
+}
+.bar.top {
+  top: 0;
+  padding: env(safe-area-inset-top) 12px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transform: translateY(-100%);
+}
+.bar.bottom {
+  bottom: 0;
+  padding: 10px 16px calc(env(safe-area-inset-bottom) + 12px);
+  transform: translateY(100%);
+}
+.bar.show { transform: translateY(0); }
+.bar .title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--panel-fg);
+  font-size: 20px;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.icon-btn:active { background: rgba(0,0,0,.08); }
+
+/* Progress bar in bottom bar */
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--panel-fg);
+}
+#progress {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: rgba(0,0,0,.15);
+  border-radius: 2px;
+  outline: none;
+}
+#progress::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+#progress::-moz-range-thumb {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+}
+
+/* Drawer (TOC + Notes) */
+.drawer {
+  position: fixed;
+  top: 0; bottom: 0;
+  left: 0;
+  width: min(85vw, 360px);
+  background: var(--panel);
+  color: var(--panel-fg);
+  z-index: 200;
+  transform: translateX(-100%);
+  transition: transform .25s ease;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 4px 0 16px var(--shadow);
+}
+.drawer.show { transform: translateX(0); }
+.drawer.right {
+  left: auto; right: 0;
+  transform: translateX(100%);
+}
+.drawer.right.show { transform: translateX(0); }
+.drawer-header {
+  padding: env(safe-area-inset-top) 16px 12px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid rgba(0,0,0,.08);
+  font-weight: 600;
+}
+.drawer-header span { flex: 1; padding-top: 10px; }
+.drawer-tabs {
+  display: flex;
+  border-bottom: 1px solid rgba(0,0,0,.08);
+}
+.drawer-tab {
+  flex: 1;
+  padding: 12px;
+  text-align: center;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  color: var(--panel-fg);
+  font-size: 14px;
+  border-bottom: 2px solid transparent;
+}
+.drawer-tab.active {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+  -webkit-overflow-scrolling: touch;
+}
+.toc-item {
+  padding: 12px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(0,0,0,.05);
+  font-size: 14px;
+  line-height: 1.4;
+}
+.toc-item.sub { padding-left: 32px; font-size: 13px; opacity: .85; }
+.toc-item:active { background: rgba(0,0,0,.06); }
+
+.note-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(0,0,0,.05);
+  cursor: pointer;
+}
+.note-item .quote {
+  font-size: 13px;
+  border-left: 3px solid var(--hl);
+  padding-left: 8px;
+  margin-bottom: 6px;
+  color: var(--panel-fg);
+  opacity: .85;
+}
+.note-item .note-text {
+  font-size: 13px;
+  color: var(--accent);
+  margin-top: 4px;
+}
+.note-item .meta {
+  font-size: 11px;
+  opacity: .6;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+.note-item .del {
+  background: none; border: none; color: #b33;
+  font-size: 12px; cursor: pointer; padding: 0;
+}
+
+/* Settings panel */
+#settings {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  background: var(--panel);
+  color: var(--panel-fg);
+  z-index: 150;
+  transform: translateY(100%);
+  transition: transform .25s ease;
+  padding: 16px 20px calc(env(safe-area-inset-bottom) + 20px);
+  box-shadow: 0 -4px 16px var(--shadow);
+  border-radius: 12px 12px 0 0;
+}
+#settings.show { transform: translateY(0); }
+.settings-row {
+  display: flex;
+  align-items: center;
+  margin: 14px 0;
+  gap: 12px;
+}
+.settings-row label {
+  flex: 0 0 70px;
+  font-size: 14px;
+}
+.settings-row .controls {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+}
+.chip {
+  padding: 8px 14px;
+  border-radius: 16px;
+  background: rgba(0,0,0,.06);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--panel-fg);
+}
+.chip.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Selection action menu */
+#sel-menu {
+  position: fixed;
+  background: #333;
+  color: #fff;
+  border-radius: 8px;
+  padding: 6px;
+  z-index: 300;
+  display: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,.3);
+  font-size: 13px;
+}
+#sel-menu button {
+  background: transparent;
+  border: none;
+  color: #fff;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  border-radius: 4px;
+}
+#sel-menu button:active { background: rgba(255,255,255,.15); }
+
+/* Note editor modal */
+#note-modal {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,.5);
+  z-index: 400;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+#note-modal.show { display: flex; }
+.note-card {
+  background: var(--panel);
+  color: var(--panel-fg);
+  border-radius: 12px;
+  padding: 16px;
+  width: 100%;
+  max-width: 400px;
+}
+.note-card .quote {
+  font-size: 13px;
+  border-left: 3px solid var(--hl);
+  padding-left: 8px;
+  margin-bottom: 12px;
+  max-height: 100px;
+  overflow-y: auto;
+}
+.note-card textarea {
+  width: 100%;
+  min-height: 100px;
+  border: 1px solid rgba(0,0,0,.15);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 14px;
+  background: var(--bg);
+  color: var(--fg);
+  resize: vertical;
+  font-family: inherit;
+}
+.note-card .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-ghost { background: transparent; color: var(--panel-fg); }
+
+/* Loading */
+#loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  color: var(--fg);
+  z-index: 500;
+  font-size: 14px;
+}
+
+#overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.4);
+  z-index: 99;
+  display: none;
+}
+#overlay.show { display: block; }
+/* Welcome screen */
+#welcome {
+  position: fixed; inset: 0; display: none; flex-direction: column;
+  align-items: center; justify-content: center; background: var(--bg);
+  color: var(--fg); z-index: 500; gap: 20px; padding: 40px 32px; text-align: center;
+}
+#welcome h1 { font-size: 24px; font-weight: 700; margin: 0; }
+#welcome p { font-size: 14px; opacity: .7; margin: 0; line-height: 1.7; }
+.pick-btn {
+  display: inline-block; background: var(--accent); color: #fff;
+  padding: 14px 36px; border-radius: 12px; font-size: 17px; cursor: pointer;
+  border: none; margin-top: 8px;
+}
+#file-input { display: none; }
+#change-book-btn {
+  position: fixed; bottom: 72px; left: 50%; transform: translateX(-50%);
+  background: var(--panel-bg); color: var(--panel-fg); border: 1px solid var(--border);
+  padding: 8px 20px; border-radius: 20px; font-size: 13px; cursor: pointer;
+  z-index: 200; opacity: .7; display: none;
+}
+</style>
+</head>
+<body data-theme="sepia">
+
+<div id="welcome">
+  <h1>EPUB 阅读器</h1>
+  <p>选择你的 EPUB 电子书文件开始阅读<br>书籍保存在设备本地，不会上传到任何服务器</p>
+  <label class="pick-btn" for="file-input">选择 EPUB 文件</label>
+  <input type="file" id="file-input" accept=".epub">
+</div>
+<button id="change-book-btn" title="更换书籍">更换书籍</button>
+
+<div id="loading">
+  <div style="text-align:center">
+    <div id="loading-msg">加载中...</div>
+    <div id="loading-debug" style="font-size:11px;opacity:.6;margin-top:12px;max-width:90vw;word-break:break-all;white-space:pre-wrap;text-align:left;font-family:monospace"></div>
+  </div>
+</div>
+<script>
+function __trunc(s, n){ s = String(s == null ? '' : s); return s.length > n ? s.slice(0,n)+'…(+'+(s.length-n)+')' : s; }
+(function(){
+  var box = document.createElement('div');
+  box.id = '__dbg_box';
+  box.style.cssText = 'position:fixed;left:4px;bottom:4px;max-width:60vw;max-height:30vh;overflow:auto;background:rgba(0,0,0,.7);color:#f88;font:11px/1.3 monospace;padding:4px 6px;z-index:9999;border-radius:4px;white-space:pre-wrap;word-break:break-all;display:none';
+  box.title = '点击隐藏';
+  box.onclick = function(){ box.style.display='none'; };
+  if (document.body) document.body.appendChild(box);
+  else document.addEventListener('DOMContentLoaded', function(){ document.body.appendChild(box); });
+  window.__dbg_box_lines = [];
+})();
+window.__dbg = function(msg){
+  var line = __trunc(msg, 200);
+  var loadEl = document.getElementById('loading-debug');
+  if(loadEl) loadEl.textContent += '\n' + line;
+  // Only surface ERR / REJECT / FATAL to the floating box; everything else stays in console.
+  if (/^(ERR|REJECT|FATAL)/.test(String(msg))) {
+    var box = document.getElementById('__dbg_box');
+    if (box) {
+      window.__dbg_box_lines.push(line);
+      if (window.__dbg_box_lines.length > 8) window.__dbg_box_lines.shift();
+      box.textContent = window.__dbg_box_lines.join('\n');
+      box.style.display = 'block';
+    }
+  }
+  console.log('[DBG]', msg);
+};
+window.addEventListener('error', function(e){
+  __dbg('ERR: ' + __trunc(e.message || e.error, 120) + ' @ ' + __trunc(e.filename||'', 80) + ':' + (e.lineno||''));
+});
+window.addEventListener('unhandledrejection', function(e){
+  var r = e.reason;
+  __dbg('REJECT: ' + __trunc(r && (r.message || r.toString && r.toString()) || r, 200));
+});
+__dbg('boot');
+__dbg('reader mode: file-picker + IndexedDB cache');
+
+__dbg('ePub: ' + (typeof window.ePub));
+__dbg('JSZip: ' + (typeof window.JSZip));
+__dbg('protocol: ' + location.protocol);
+</script>
+
+<div id="viewer"></div>
+
+<div class="tap-zone left" id="tap-left"></div>
+<div class="tap-zone center" id="tap-center"></div>
+<div class="tap-zone right" id="tap-right"></div>
+
+<!-- Floating page buttons (always visible) -->
+<button class="float-btn left"  id="float-prev" title="上一页">‹</button>
+<button class="float-btn right" id="float-next" title="下一页">›</button>
+
+<!-- Top bar -->
+<div class="bar top" id="topbar">
+  <button class="icon-btn" id="btn-toc" title="目录">☰</button>
+  <div class="title" id="book-title">选择书籍</div>
+  <button class="icon-btn" id="btn-chapter-start" title="回到章节开头">↺</button>
+  <button class="icon-btn" id="btn-notes" title="笔记">✎</button>
+  <button class="icon-btn" id="btn-settings" title="设置">⚙</button>
+</div>
+
+<!-- Bottom bar -->
+<div class="bar bottom" id="bottombar">
+  <div class="progress-row">
+    <span id="progress-label">0%</span>
+    <input type="range" id="progress" min="0" max="100" value="0" step="0.1">
+  </div>
+  <div class="progress-row" style="margin-top:8px;justify-content:space-around">
+    <button class="icon-btn" id="btn-prev-chap" title="上一章">⏮</button>
+    <button class="icon-btn" id="btn-prev"      title="上一页">‹</button>
+    <button class="icon-btn" id="btn-chap"      title="本章开头">↺</button>
+    <button class="icon-btn" id="btn-next"      title="下一页">›</button>
+    <button class="icon-btn" id="btn-next-chap" title="下一章">⏭</button>
+  </div>
+</div>
+
+<!-- TOC drawer -->
+<div class="drawer" id="drawer-toc">
+  <div class="drawer-header"><span>目录</span><button class="icon-btn" data-close="drawer-toc">×</button></div>
+  <div class="drawer-body" id="toc-list"></div>
+</div>
+
+<!-- Notes drawer -->
+<div class="drawer right" id="drawer-notes">
+  <div class="drawer-header"><span>笔记与划线</span><button class="icon-btn" data-close="drawer-notes">×</button></div>
+  <div class="drawer-body" id="notes-list"></div>
+</div>
+
+<!-- Settings -->
+<div id="settings">
+  <div class="settings-row">
+    <label>字号</label>
+    <div class="controls">
+      <button class="chip" data-font="80">小</button>
+      <button class="chip" data-font="100">中</button>
+      <button class="chip" data-font="125">大</button>
+      <button class="chip" data-font="150">特大</button>
+    </div>
+  </div>
+  <div class="settings-row">
+    <label>主题</label>
+    <div class="controls">
+      <button class="chip" data-theme="light">明亮</button>
+      <button class="chip" data-theme="sepia">护眼</button>
+      <button class="chip" data-theme="dark">夜间</button>
+    </div>
+  </div>
+</div>
+
+<div id="overlay"></div>
+
+<!-- Selection menu -->
+<div id="sel-menu">
+  <button id="act-highlight">划线</button>
+  <button id="act-note">笔记</button>
+  <button id="act-copy">复制</button>
+</div>
+
+<!-- Note modal -->
+<div id="note-modal">
+  <div class="note-card">
+    <div class="quote" id="note-quote"></div>
+    <textarea id="note-text" placeholder="写下你的想法..."></textarea>
+    <div class="actions">
+      <button class="btn btn-ghost" id="note-cancel">取消</button>
+      <button class="btn btn-primary" id="note-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------- Storage (safe wrapper, falls back to in-memory) ----------
+const safeStorage = (function(){
+  try {
+    window.localStorage.setItem('__t__', '1');
+    window.localStorage.removeItem('__t__');
+    return window.localStorage;
+  } catch (e) {
+    if (window.__dbg) __dbg('localStorage disabled, using memory');
+    const m = {};
+    return {
+      getItem: k => (k in m ? m[k] : null),
+      setItem: (k, v) => { m[k] = String(v); },
+      removeItem: k => { delete m[k]; }
+    };
+  }
+})();
+
+const KEY_LOC = 'reader:location';
+const KEY_SET = 'reader:settings';
+const KEY_HL = 'reader:highlights';
+
+const settings = Object.assign(
+  { fontSize: 100, theme: 'sepia' },
+  JSON.parse(safeStorage.getItem(KEY_SET) || '{}')
+);
+let highlights = JSON.parse(safeStorage.getItem(KEY_HL) || '[]');
+
+const saveSettings = () => safeStorage.setItem(KEY_SET, JSON.stringify(settings));
+const saveHighlights = () => safeStorage.setItem(KEY_HL, JSON.stringify(highlights));
+
+// ---------- Init epub ----------
+function b64ToArrayBuffer(b64) {
+  const bin = atob(b64);
+  const len = bin.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+// ---------- IndexedDB cache ----------
+const IDB_DB = 'epub-reader', IDB_ST = 'books', IDB_K = 'current';
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(IDB_DB, 1);
+    r.onupgradeneeded = e => e.target.result.createObjectStore(IDB_ST);
+    r.onsuccess = e => res(e.target.result);
+    r.onerror = rej;
+  });
+}
+async function idbSave(buf) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_ST, 'readwrite');
+    tx.objectStore(IDB_ST).put(buf, IDB_K);
+    tx.oncomplete = res; tx.onerror = rej;
+  });
+}
+async function idbLoad() {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_ST, 'readonly');
+    const req = tx.objectStore(IDB_ST).get(IDB_K);
+    req.onsuccess = e => res(e.target.result);
+    req.onerror = rej;
+  });
+}
+
+let book, rendition;
+
+function initReader(arrayBuffer) {
+  document.getElementById('welcome').style.display = 'none';
+  document.getElementById('loading').style.display = 'flex';
+  document.getElementById('loading-msg').textContent = '加载中...';
+  try {
+    book = ePub(arrayBuffer);
+    __dbg('ePub() ok');
+  } catch(e) {
+    __dbg('FATAL init: ' + (e && e.message));
+    document.getElementById('loading-msg').textContent = '文件加载失败，请重试';
+    return;
+  }
+  rendition = book.renderTo('viewer', {
+    width: '100%', height: '100%', flow: 'paginated',
+    spread: 'none', manager: 'default', allowScriptedContent: true
+  });
+
+  // Apply themes
+  rendition.themes.register('light',  { body: { 'color': '#2b2620', 'background': '#f5efe0' } });
+  rendition.themes.register('sepia',  { body: { 'color': '#5b4636', 'background': '#f4ecd8' } });
+  rendition.themes.register('dark',   { body: { 'color': '#d4cfc4', 'background': '#1a1a1a' } });
+
+  // Display saved location or first page
+  const savedLoc = safeStorage.getItem(KEY_LOC);
+
+  book.opened.then(() => __dbg('book.opened ok')).catch(e => __dbg('book.opened ERR: ' + (e && e.message)));
+  book.ready.then(() => __dbg('book.ready ok')).catch(e => __dbg('book.ready ERR: ' + (e && e.message)));
+
+  rendition.display(savedLoc || undefined).then(() => {
+    __dbg('display ok');
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('change-book-btn').style.display = 'block';
+    applyTheme(settings.theme);
+    applyFont(settings.fontSize);
+    highlights.forEach(h => addHighlightToView(h));
+  }).catch(e => __dbg('display ERR: ' + (e && e.message)));
+
+  book.ready.then(() => book.locations.generate(1600)).catch(e => __dbg('locations ERR: ' + (e && e.message)));
+
+  book.loaded.metadata.then(meta => {
+    if (meta.title) document.getElementById('book-title').textContent = meta.title;
+  });
+}
+
+// ---------- Theme / font ----------
+function applyTheme(name) {
+  settings.theme = name;
+  document.body.dataset.theme = name;
+  rendition.themes.select(name);
+  saveSettings();
+  updateChips();
+}
+function applyFont(size) {
+  settings.fontSize = +size;
+  rendition.themes.fontSize(size + '%');
+  saveSettings();
+  updateChips();
+}
+function updateChips() {
+  document.querySelectorAll('[data-theme]').forEach(b => b.classList.toggle('active', b.dataset.theme === settings.theme));
+  document.querySelectorAll('[data-font]').forEach(b => b.classList.toggle('active', +b.dataset.font === settings.fontSize));
+}
+
+// ---------- Startup ----------
+(async function() {
+  try {
+    const buf = await idbLoad();
+    if (buf) {
+      __dbg('Cached book found in IDB');
+      initReader(buf);
+    } else {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('welcome').style.display = 'flex';
+    }
+  } catch(e) {
+    __dbg('IDB load error: ' + (e && e.message));
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('welcome').style.display = 'flex';
+  }
+})();
+
+document.getElementById('file-input').addEventListener('change', async function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (ev) => {
+    const buf = ev.target.result;
+    try { await idbSave(buf); } catch(err) { __dbg('IDB save failed: ' + (err && err.message)); }
+    initReader(buf);
+  };
+  reader.onerror = () => __dbg('FileReader error');
+  reader.readAsArrayBuffer(file);
+});
+
+document.getElementById('change-book-btn').addEventListener('click', function() {
+  document.getElementById('file-input').click();
+});
+
+
+// ---------- TOC ----------
+const HEADING_STANDALONE = ['译者序','前言','原著序','附录','这本书对你有十二种功用','如何从这本书里获得最大效益'];
+const RX_PIAN = /^第[\d一二三四五六七八九十百千万零]+篇/;
+const RX_ZHANG = /^第[\d一二三四五六七八九十百千万零]+章/;
+
+function isHeadingCandidate(text) {
+  if (!text || text.length > 60) return false;
+  if (RX_PIAN.test(text) || RX_ZHANG.test(text)) return true;
+  return HEADING_STANDALONE.includes(text);
+}
+
+function detectTocDumpRange(cands) {
+  // Find longest run where consecutive candidates are within 3 paras of each other.
+  if (cands.length < 5) return null;
+  let bestStart = 0, bestLen = 1, curStart = 0, curLen = 1;
+  for (let i = 1; i < cands.length; i++) {
+    if (cands[i].paraIdx - cands[i-1].paraIdx <= 3) {
+      curLen++;
+      if (curLen > bestLen) { bestLen = curLen; bestStart = curStart; }
+    } else {
+      curStart = i; curLen = 1;
+    }
+  }
+  if (bestLen < 8) return null;
+  return { from: cands[bestStart].paraIdx, to: cands[bestStart + bestLen - 1].paraIdx };
+}
+
+async function buildRichToc() {
+  const items = book.spine.spineItems || book.spine.items || [];
+  const out = [];
+  const seenStandalone = new Set();
+  for (const item of items) {
+    let doc;
+    try {
+      doc = await item.load(book.load.bind(book));
+    } catch (e) { continue; }
+    const paras = Array.from(doc.querySelectorAll('p'));
+    const cands = [];
+    paras.forEach((p, idx) => {
+      const text = (p.textContent || '').replace(/\s+/g, ' ').trim();
+      if (isHeadingCandidate(text)) cands.push({ paraIdx: idx, el: p, text });
+    });
+    const skipRange = detectTocDumpRange(cands);
+    for (const c of cands) {
+      if (skipRange && c.paraIdx >= skipRange.from && c.paraIdx <= skipRange.to) continue;
+      // Standalone titles like "前言"/"译者序" should appear only once globally.
+      if (HEADING_STANDALONE.includes(c.text)) {
+        if (seenStandalone.has(c.text)) continue;
+        seenStandalone.add(c.text);
+      }
+      // Skip back-to-back duplicate label (within same article).
+      if (out.length && out[out.length - 1].label === c.text) continue;
+      let cfi = null;
+      try { cfi = item.cfiFromElement(c.el); } catch (e) {}
+      if (!cfi) continue;
+      const depth = RX_ZHANG.test(c.text) ? 1 : 0;
+      out.push({ label: c.text, cfi, depth });
+    }
+    try { item.unload(); } catch (e) {}
+  }
+  return out;
+}
+
+function renderToc(entries) {
+  const list = document.getElementById('toc-list');
+  list.innerHTML = '';
+  if (!entries.length) {
+    list.innerHTML = '<div style="padding:24px;text-align:center;opacity:.6;font-size:13px">无目录</div>';
+    return;
+  }
+  entries.forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'toc-item' + (item.depth ? ' sub' : '');
+    div.textContent = item.label;
+    div.onclick = () => {
+      toggleDrawer('drawer-toc', false);
+      rendition.display(item.cfi || item.href).then(
+        () => setTimeout(() => flashChapter(item.label), 120),
+        e => __dbg && __dbg('ERR display: ' + (e && e.message))
+      );
+    };
+    list.appendChild(div);
+  });
+}
+
+// Inject heading styles + mark headings inside each rendered section iframe.
+const HEADING_CSS = `
+  body > h2:first-child { display: none; }
+  p.ch-pian {
+    font-size: 1.55em;
+    font-weight: bold;
+    text-align: center;
+    margin: 1.8em 0 1em;
+    padding: 0.4em 0;
+    border-top: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    letter-spacing: 0.15em;
+  }
+  p.ch-zhang {
+    font-size: 1.25em;
+    font-weight: bold;
+    margin: 1.5em 0 0.6em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px dashed currentColor;
+  }
+  p.ch-std {
+    font-size: 1.3em;
+    font-weight: bold;
+    text-align: center;
+    margin: 1.5em 0 0.7em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid currentColor;
+  }
+  p.ch-flash {
+    animation: chFlash 1.8s ease-out;
+  }
+  @keyframes chFlash {
+    0%   { background: rgba(255,224,102,.85); }
+    40%  { background: rgba(255,224,102,.6);  }
+    100% { background: transparent; }
+  }
+`;
+rendition.hooks.content.register(function(contents) {
+  const doc = contents.document;
+  if (!doc.getElementById('__ch_style')) {
+    const s = doc.createElement('style');
+    s.id = '__ch_style';
+    s.textContent = HEADING_CSS;
+    doc.head.appendChild(s);
+  }
+  const paras = Array.from(doc.querySelectorAll('p'));
+  const cands = [];
+  paras.forEach((p, idx) => {
+    const text = (p.textContent || '').replace(/\s+/g, ' ').trim();
+    if (isHeadingCandidate(text)) cands.push({ idx, p, text });
+  });
+  const skipRange = detectTocDumpRange(cands);
+  cands.forEach(c => {
+    if (skipRange && c.idx >= skipRange.from && c.idx <= skipRange.to) return;
+    if (RX_PIAN.test(c.text)) c.p.classList.add('ch-pian');
+    else if (RX_ZHANG.test(c.text)) c.p.classList.add('ch-zhang');
+    else if (HEADING_STANDALONE.includes(c.text)) c.p.classList.add('ch-std');
+  });
+});
+
+function flashChapter(label) {
+  const arr = rendition.getContents();
+  if (!arr || !arr[0]) return;
+  const doc = arr[0].document;
+  const marked = doc.querySelectorAll('p.ch-pian, p.ch-zhang, p.ch-std');
+  const norm = (label || '').replace(/\s+/g, ' ').trim();
+  for (const el of marked) {
+    const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    if (t === norm) {
+      el.classList.remove('ch-flash');
+      void el.offsetWidth; // restart animation
+      el.classList.add('ch-flash');
+      setTimeout(() => el.classList.remove('ch-flash'), 1900);
+      return;
+    }
+  }
+}
+
+book.loaded.navigation.then(async nav => {
+  const list = document.getElementById('toc-list');
+  list.innerHTML = '<div style="padding:24px;text-align:center;opacity:.6;font-size:13px">解析章节中...</div>';
+  let rich = [];
+  try { rich = await buildRichToc(); } catch (e) { __dbg && __dbg('rich toc ERR: ' + (e && e.message)); }
+
+  if (rich.length >= (nav.toc ? nav.toc.length : 0)) {
+    renderToc(rich);
+  } else {
+    // fallback to native nav
+    const flat = [];
+    (function walk(items, depth){
+      items.forEach(it => {
+        flat.push({ label: (it.label||'').trim(), href: it.href, depth });
+        if (it.subitems && it.subitems.length) walk(it.subitems, depth + 1);
+      });
+    })(nav.toc, 0);
+    renderToc(flat);
+  }
+});
+
+// ---------- Position + progress ----------
+const progress = document.getElementById('progress');
+const progressLabel = document.getElementById('progress-label');
+
+rendition.on('relocated', loc => {
+  safeStorage.setItem(KEY_LOC, loc.start.cfi);
+  if (book.locations.length()) {
+    const pct = book.locations.percentageFromCfi(loc.start.cfi);
+    progress.value = (pct * 100).toFixed(1);
+    progressLabel.textContent = (pct * 100).toFixed(1) + '%';
+  }
+});
+
+progress.addEventListener('change', () => {
+  if (!book.locations.length()) return;
+  const cfi = book.locations.cfiFromPercentage(progress.value / 100);
+  rendition.display(cfi);
+});
+
+// ---------- Tap zones / page turn ----------
+document.getElementById('tap-left').onclick = () => rendition.prev();
+document.getElementById('tap-right').onclick = () => rendition.next();
+document.getElementById('tap-center').onclick = () => toggleBars();
+document.getElementById('btn-prev').onclick = () => rendition.prev();
+document.getElementById('btn-next').onclick = () => rendition.next();
+document.getElementById('float-prev').onclick = () => rendition.prev();
+document.getElementById('float-next').onclick = () => rendition.next();
+
+// Chapter navigation
+function chapterStart() {
+  const loc = rendition.location && rendition.location.start;
+  if (!loc) return;
+  const baseHref = (loc.href || '').split('#')[0];
+  if (baseHref) rendition.display(baseHref);
+}
+function goChapter(delta) {
+  const loc = rendition.location && rendition.location.start;
+  if (!loc) return;
+  const target = book.spine.get(loc.index + delta);
+  if (target && target.href) rendition.display(target.href);
+}
+document.getElementById('btn-chapter-start').onclick = chapterStart;
+document.getElementById('btn-chap').onclick = chapterStart;
+document.getElementById('btn-prev-chap').onclick = () => goChapter(-1);
+document.getElementById('btn-next-chap').onclick = () => goChapter(1);
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') rendition.prev();
+  if (e.key === 'ArrowRight') rendition.next();
+});
+
+// Swipe inside iframe
+rendition.on('rendered', section => {
+  const iframe = rendition.getContents()[0];
+  if (!iframe) return;
+  const doc = iframe.document;
+  let startX = 0, startY = 0, t0 = 0;
+  doc.addEventListener('touchstart', e => {
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    t0 = Date.now();
+  }, { passive: true });
+  doc.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - startX;
+    const dy = e.changedTouches[0].clientY - startY;
+    const dt = Date.now() - t0;
+    if (dt < 500 && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      dx < 0 ? rendition.next() : rendition.prev();
+    }
+  }, { passive: true });
+});
+
+// ---------- Bars / drawers ----------
+function toggleBars(force) {
+  const t = document.getElementById('topbar');
+  const b = document.getElementById('bottombar');
+  const show = force !== undefined ? force : !t.classList.contains('show');
+  t.classList.toggle('show', show);
+  b.classList.toggle('show', show);
+  if (!show) document.getElementById('settings').classList.remove('show');
+}
+function toggleDrawer(id, force) {
+  const el = document.getElementById(id);
+  const ov = document.getElementById('overlay');
+  const show = force !== undefined ? force : !el.classList.contains('show');
+  document.querySelectorAll('.drawer').forEach(d => d.classList.remove('show'));
+  el.classList.toggle('show', show);
+  ov.classList.toggle('show', show);
+}
+document.getElementById('btn-toc').onclick = () => toggleDrawer('drawer-toc');
+document.getElementById('btn-notes').onclick = () => { renderNotes(); toggleDrawer('drawer-notes'); };
+document.getElementById('btn-settings').onclick = () => {
+  document.getElementById('settings').classList.toggle('show');
+};
+document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => toggleDrawer(b.dataset.close, false));
+document.getElementById('overlay').onclick = () => {
+  document.querySelectorAll('.drawer').forEach(d => d.classList.remove('show'));
+  document.getElementById('overlay').classList.remove('show');
+};
+
+// Settings chips
+document.querySelectorAll('[data-theme]').forEach(b => b.onclick = () => applyTheme(b.dataset.theme));
+document.querySelectorAll('[data-font]').forEach(b => b.onclick = () => applyFont(+b.dataset.font));
+
+// ---------- Highlights / notes ----------
+const selMenu = document.getElementById('sel-menu');
+let pendingSel = null;
+
+rendition.on('selected', (cfiRange, contents) => {
+  const sel = contents.window.getSelection();
+  const text = sel.toString().trim();
+  if (!text) return;
+  const range = sel.getRangeAt(0).getBoundingClientRect();
+  const iframe = contents.document.defaultView.frameElement;
+  const fr = iframe.getBoundingClientRect();
+  pendingSel = { cfi: cfiRange, text, contents };
+  selMenu.style.display = 'block';
+  const x = fr.left + range.left + range.width / 2;
+  const y = fr.top + range.top - 50;
+  selMenu.style.left = Math.max(10, Math.min(window.innerWidth - selMenu.offsetWidth - 10, x - selMenu.offsetWidth / 2)) + 'px';
+  selMenu.style.top = Math.max(10, y) + 'px';
+});
+
+rendition.on('click', () => {
+  selMenu.style.display = 'none';
+});
+
+document.getElementById('act-highlight').onclick = () => {
+  if (!pendingSel) return;
+  addHighlight(pendingSel.cfi, pendingSel.text);
+  pendingSel.contents.window.getSelection().removeAllRanges();
+  selMenu.style.display = 'none';
+};
+document.getElementById('act-note').onclick = () => {
+  if (!pendingSel) return;
+  document.getElementById('note-quote').textContent = pendingSel.text;
+  document.getElementById('note-text').value = '';
+  document.getElementById('note-modal').classList.add('show');
+  document.getElementById('note-modal').dataset.cfi = pendingSel.cfi;
+  document.getElementById('note-modal').dataset.text = pendingSel.text;
+  selMenu.style.display = 'none';
+};
+document.getElementById('act-copy').onclick = () => {
+  if (!pendingSel) return;
+  navigator.clipboard?.writeText(pendingSel.text);
+  pendingSel.contents.window.getSelection().removeAllRanges();
+  selMenu.style.display = 'none';
+};
+
+document.getElementById('note-cancel').onclick = () => document.getElementById('note-modal').classList.remove('show');
+document.getElementById('note-save').onclick = () => {
+  const m = document.getElementById('note-modal');
+  const cfi = m.dataset.cfi;
+  const text = m.dataset.text;
+  const note = document.getElementById('note-text').value.trim();
+  addHighlight(cfi, text, note);
+  m.classList.remove('show');
+};
+
+function addHighlight(cfi, text, note = '') {
+  // dedupe by cfi
+  const existing = highlights.findIndex(h => h.cfi === cfi);
+  const item = { cfi, text, note, ts: Date.now() };
+  if (existing >= 0) {
+    highlights[existing] = item;
+  } else {
+    highlights.push(item);
+    addHighlightToView(item);
+  }
+  saveHighlights();
+}
+
+function addHighlightToView(h) {
+  try {
+    rendition.annotations.add('highlight', h.cfi, {}, e => {
+      // tap on highlight: open note edit
+      document.getElementById('note-quote').textContent = h.text;
+      document.getElementById('note-text').value = h.note || '';
+      const m = document.getElementById('note-modal');
+      m.classList.add('show');
+      m.dataset.cfi = h.cfi;
+      m.dataset.text = h.text;
+    }, 'hl-' + h.cfi.replace(/[^a-z0-9]/gi, ''), { fill: 'rgba(255,224,102,0.4)', 'fill-opacity': '0.4', 'mix-blend-mode': 'multiply' });
+  } catch (e) { console.warn('annotation failed', e); }
+}
+
+function renderNotes() {
+  const list = document.getElementById('notes-list');
+  list.innerHTML = '';
+  if (!highlights.length) {
+    list.innerHTML = '<div style="padding:24px;text-align:center;opacity:.6;font-size:13px">还没有笔记</div>';
+    return;
+  }
+  highlights.slice().reverse().forEach(h => {
+    const d = document.createElement('div');
+    d.className = 'note-item';
+    const date = new Date(h.ts).toLocaleDateString('zh-CN');
+    d.innerHTML = `
+      <div class="quote">${escapeHtml(h.text)}</div>
+      ${h.note ? `<div class="note-text">${escapeHtml(h.note)}</div>` : ''}
+      <div class="meta"><span>${date}</span><button class="del">删除</button></div>
+    `;
+    d.onclick = (e) => {
+      if (e.target.classList.contains('del')) return;
+      rendition.display(h.cfi);
+      toggleDrawer('drawer-notes', false);
+    };
+    d.querySelector('.del').onclick = (e) => {
+      e.stopPropagation();
+      removeHighlight(h.cfi);
+      renderNotes();
+    };
+    list.appendChild(d);
+  });
+}
+
+function removeHighlight(cfi) {
+  highlights = highlights.filter(h => h.cfi !== cfi);
+  saveHighlights();
+  try { rendition.annotations.remove(cfi, 'highlight'); } catch (e) {}
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+// ---------- Service worker ----------
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW failed', e));
+}
+</script>
+</body>
+</html>
