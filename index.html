@@ -672,14 +672,34 @@ function initReader(arrayBuffer) {
   book.opened.then(() => __dbg('book.opened ok')).catch(e => __dbg('book.opened ERR: ' + (e && e.message)));
   book.ready.then(() => __dbg('book.ready ok')).catch(e => __dbg('book.ready ERR: ' + (e && e.message)));
 
-  rendition.display(savedLoc || undefined).then(() => {
+  const displayTimeout = setTimeout(async () => {
+    __dbg('display timeout — clearing IDB and restarting');
+    try { await idbSave(null); } catch(e) {}
+    safeStorage.removeItem(KEY_LOC);
+    document.getElementById('loading-msg').textContent = '加载超时，请重新选择文件';
+    setTimeout(() => {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('welcome').style.display = 'flex';
+    }, 1500);
+  }, 15000);
+
+  const doDisplay = (cfi) => rendition.display(cfi).then(() => {
+    clearTimeout(displayTimeout);
     __dbg('display ok');
     document.getElementById('loading').style.display = 'none';
     document.getElementById('change-book-btn').style.display = 'block';
     applyTheme(settings.theme);
     applyFont(settings.fontSize);
     highlights.forEach(h => addHighlightToView(h));
-  }).catch(e => __dbg('display ERR: ' + (e && e.message)));
+  }).catch(e => {
+    __dbg('display ERR: ' + (e && e.message));
+    if (cfi) {
+      __dbg('retrying without saved location');
+      safeStorage.removeItem(KEY_LOC);
+      doDisplay(undefined);
+    }
+  });
+  doDisplay(savedLoc || undefined);
 
   book.ready.then(() => book.locations.generate(1600)).catch(e => __dbg('locations ERR: ' + (e && e.message)));
 

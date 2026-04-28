@@ -1,10 +1,9 @@
-const CACHE = 'reader-v1';
+const CACHE = 'reader-v3';
 const ASSETS = [
   './',
   './index.html',
   './manifest.json',
   './icon.svg',
-  './人性的弱点.epub',
   'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js',
   'https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js'
 ];
