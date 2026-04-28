@@ -662,9 +662,11 @@ function initReader(arrayBuffer) {
   });
 
   // Apply themes
-  rendition.themes.register('light',  { body: { 'color': '#2b2620', 'background': '#f5efe0' } });
-  rendition.themes.register('sepia',  { body: { 'color': '#5b4636', 'background': '#f4ecd8' } });
-  rendition.themes.register('dark',   { body: { 'color': '#d4cfc4', 'background': '#1a1a1a' } });
+  try {
+    rendition.themes.register('light',  { body: { 'color': '#2b2620', 'background': '#f5efe0' } });
+    rendition.themes.register('sepia',  { body: { 'color': '#5b4636', 'background': '#f4ecd8' } });
+    rendition.themes.register('dark',   { body: { 'color': '#d4cfc4', 'background': '#1a1a1a' } });
+  } catch(e) { __dbg('themes register ERR: ' + e.message); }
 
   // Display saved location or first page
   const savedLoc = safeStorage.getItem(KEY_LOC);
@@ -801,13 +803,13 @@ function initReader(arrayBuffer) {
 function applyTheme(name) {
   settings.theme = name;
   document.body.dataset.theme = name;
-  rendition.themes.select(name);
+  try { if (rendition && rendition.themes) rendition.themes.select(name); } catch(e) {}
   saveSettings();
   updateChips();
 }
 function applyFont(size) {
   settings.fontSize = +size;
-  rendition.themes.fontSize(size + '%');
+  try { if (rendition && rendition.themes) rendition.themes.fontSize(size + '%'); } catch(e) {}
   saveSettings();
   updateChips();
 }
