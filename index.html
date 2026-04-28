@@ -754,6 +754,27 @@ function initReader(arrayBuffer) {
   rendition.on('click', () => {
     selMenu.style.display = 'none';
   });
+
+  book.loaded.navigation.then(async nav => {
+    const list = document.getElementById('toc-list');
+    list.innerHTML = '<div style="padding:24px;text-align:center;opacity:.6;font-size:13px">解析章节中...</div>';
+    let rich = [];
+    try { rich = await buildRichToc(); } catch (e) { __dbg && __dbg('rich toc ERR: ' + (e && e.message)); }
+  
+    if (rich.length >= (nav.toc ? nav.toc.length : 0)) {
+      renderToc(rich);
+    } else {
+      // fallback to native nav
+      const flat = [];
+      (function walk(items, depth){
+        items.forEach(it => {
+          flat.push({ label: (it.label||'').trim(), href: it.href, depth });
+          if (it.subitems && it.subitems.length) walk(it.subitems, depth + 1);
+        });
+      })(nav.toc, 0);
+      renderToc(flat);
+    }
+  });
 }
 
 // ---------- Theme / font ----------
@@ -952,26 +973,6 @@ function flashChapter(label) {
   }
 }
 
-book.loaded.navigation.then(async nav => {
-  const list = document.getElementById('toc-list');
-  list.innerHTML = '<div style="padding:24px;text-align:center;opacity:.6;font-size:13px">解析章节中...</div>';
-  let rich = [];
-  try { rich = await buildRichToc(); } catch (e) { __dbg && __dbg('rich toc ERR: ' + (e && e.message)); }
-
-  if (rich.length >= (nav.toc ? nav.toc.length : 0)) {
-    renderToc(rich);
-  } else {
-    // fallback to native nav
-    const flat = [];
-    (function walk(items, depth){
-      items.forEach(it => {
-        flat.push({ label: (it.label||'').trim(), href: it.href, depth });
-        if (it.subitems && it.subitems.length) walk(it.subitems, depth + 1);
-      });
-    })(nav.toc, 0);
-    renderToc(flat);
-  }
-});
 
 // ---------- Position + progress ----------
 const progress = document.getElementById('progress');
