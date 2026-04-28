@@ -686,6 +686,74 @@ function initReader(arrayBuffer) {
   book.loaded.metadata.then(meta => {
     if (meta.title) document.getElementById('book-title').textContent = meta.title;
   });
+
+  // ---------- Rendition event hooks ----------
+  rendition.hooks.content.register(function(contents) {
+    const doc = contents.document;
+    if (!doc.getElementById('__ch_style')) {
+      const s = doc.createElement('style');
+      s.id = '__ch_style';
+      s.textContent = HEADING_CSS;
+      doc.head.appendChild(s);
+    }
+    const paras = Array.from(doc.querySelectorAll('p'));
+    const cands = [];
+    paras.forEach((p, idx) => {
+      const text = (p.textContent || '').replace(/\s+/g, ' ').trim();
+      if (isHeadingCandidate(text)) cands.push({ idx, p, text });
+    });
+    const skipRange = detectTocDumpRange(cands);
+    cands.forEach(c => {
+      if (skipRange && c.idx >= skipRange.from && c.idx <= skipRange.to) return;
+      if (RX_PIAN.test(c.text)) c.p.classList.add('ch-pian');
+      else if (RX_ZHANG.test(c.text)) c.p.classList.add('ch-zhang');
+      else if (HEADING_STANDALONE.includes(c.text)) c.p.classList.add('ch-std');
+    });
+  });
+  rendition.on('relocated', loc => {
+    safeStorage.setItem(KEY_LOC, loc.start.cfi);
+    if (book.locations.length()) {
+      const pct = book.locations.percentageFromCfi(loc.start.cfi);
+      progress.value = (pct * 100).toFixed(1);
+      progressLabel.textContent = (pct * 100).toFixed(1) + '%';
+    }
+  });
+  rendition.on('rendered', section => {
+    const iframe = rendition.getContents()[0];
+    if (!iframe) return;
+    const doc = iframe.document;
+    let startX = 0, startY = 0, t0 = 0;
+    doc.addEventListener('touchstart', e => {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      t0 = Date.now();
+    }, { passive: true });
+    doc.addEventListener('touchend', e => {
+      const dx = e.changedTouches[0].clientX - startX;
+      const dy = e.changedTouches[0].clientY - startY;
+      const dt = Date.now() - t0;
+      if (dt < 500 && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        dx < 0 ? rendition.next() : rendition.prev();
+      }
+    }, { passive: true });
+  });
+  rendition.on('selected', (cfiRange, contents) => {
+    const sel = contents.window.getSelection();
+    const text = sel.toString().trim();
+    if (!text) return;
+    const range = sel.getRangeAt(0).getBoundingClientRect();
+    const iframe = contents.document.defaultView.frameElement;
+    const fr = iframe.getBoundingClientRect();
+    pendingSel = { cfi: cfiRange, text, contents };
+    selMenu.style.display = 'block';
+    const x = fr.left + range.left + range.width / 2;
+    const y = fr.top + range.top - 50;
+    selMenu.style.left = Math.max(10, Math.min(window.innerWidth - selMenu.offsetWidth - 10, x - selMenu.offsetWidth / 2)) + 'px';
+    selMenu.style.top = Math.max(10, y) + 'px';
+  });
+  rendition.on('click', () => {
+    selMenu.style.display = 'none';
+  });
 }
 
 // ---------- Theme / font ----------
@@ -865,28 +933,6 @@ const HEADING_CSS = `
     100% { background: transparent; }
   }
 `;
-rendition.hooks.content.register(function(contents) {
-  const doc = contents.document;
-  if (!doc.getElementById('__ch_style')) {
-    const s = doc.createElement('style');
-    s.id = '__ch_style';
-    s.textContent = HEADING_CSS;
-    doc.head.appendChild(s);
-  }
-  const paras = Array.from(doc.querySelectorAll('p'));
-  const cands = [];
-  paras.forEach((p, idx) => {
-    const text = (p.textContent || '').replace(/\s+/g, ' ').trim();
-    if (isHeadingCandidate(text)) cands.push({ idx, p, text });
-  });
-  const skipRange = detectTocDumpRange(cands);
-  cands.forEach(c => {
-    if (skipRange && c.idx >= skipRange.from && c.idx <= skipRange.to) return;
-    if (RX_PIAN.test(c.text)) c.p.classList.add('ch-pian');
-    else if (RX_ZHANG.test(c.text)) c.p.classList.add('ch-zhang');
-    else if (HEADING_STANDALONE.includes(c.text)) c.p.classList.add('ch-std');
-  });
-});
 
 function flashChapter(label) {
   const arr = rendition.getContents();
@@ -931,14 +977,6 @@ book.loaded.navigation.then(async nav => {
 const progress = document.getElementById('progress');
 const progressLabel = document.getElementById('progress-label');
 
-rendition.on('relocated', loc => {
-  safeStorage.setItem(KEY_LOC, loc.start.cfi);
-  if (book.locations.length()) {
-    const pct = book.locations.percentageFromCfi(loc.start.cfi);
-    progress.value = (pct * 100).toFixed(1);
-    progressLabel.textContent = (pct * 100).toFixed(1) + '%';
-  }
-});
 
 progress.addEventListener('change', () => {
   if (!book.locations.length()) return;
@@ -980,25 +1018,6 @@ document.addEventListener('keydown', e => {
 });
 
 // Swipe inside iframe
-rendition.on('rendered', section => {
-  const iframe = rendition.getContents()[0];
-  if (!iframe) return;
-  const doc = iframe.document;
-  let startX = 0, startY = 0, t0 = 0;
-  doc.addEventListener('touchstart', e => {
-    startX = e.touches[0].clientX;
-    startY = e.touches[0].clientY;
-    t0 = Date.now();
-  }, { passive: true });
-  doc.addEventListener('touchend', e => {
-    const dx = e.changedTouches[0].clientX - startX;
-    const dy = e.changedTouches[0].clientY - startY;
-    const dt = Date.now() - t0;
-    if (dt < 500 && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-      dx < 0 ? rendition.next() : rendition.prev();
-    }
-  }, { passive: true });
-});
 
 // ---------- Bars / drawers ----------
 function toggleBars(force) {
@@ -1036,24 +1055,7 @@ document.querySelectorAll('[data-font]').forEach(b => b.onclick = () => applyFon
 const selMenu = document.getElementById('sel-menu');
 let pendingSel = null;
 
-rendition.on('selected', (cfiRange, contents) => {
-  const sel = contents.window.getSelection();
-  const text = sel.toString().trim();
-  if (!text) return;
-  const range = sel.getRangeAt(0).getBoundingClientRect();
-  const iframe = contents.document.defaultView.frameElement;
-  const fr = iframe.getBoundingClientRect();
-  pendingSel = { cfi: cfiRange, text, contents };
-  selMenu.style.display = 'block';
-  const x = fr.left + range.left + range.width / 2;
-  const y = fr.top + range.top - 50;
-  selMenu.style.left = Math.max(10, Math.min(window.innerWidth - selMenu.offsetWidth - 10, x - selMenu.offsetWidth / 2)) + 'px';
-  selMenu.style.top = Math.max(10, y) + 'px';
-});
 
-rendition.on('click', () => {
-  selMenu.style.display = 'none';
-});
 
 document.getElementById('act-highlight').onclick = () => {
   if (!pendingSel) return;
